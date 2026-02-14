@@ -1,0 +1,190 @@
+{
+  "name": "morezero-bootstrap",
+  "version": "1.0.0",
+  "description": "Capability bootstrap: tools, workflows, agents, models, prompts, and system",
+  "minimum_capabilities": [
+    "system.registry",
+    "system.auth",
+    "system.config",
+    "system.health",
+    "system.events"
+  ],
+  "capabilities": {
+    "system.registry": {
+      "subject": "cap.system.registry.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Core registry service for capability resolution",
+      "methods": ["resolve", "discover", "describe", "upsert", "deprecate", "disable", "setDefaultMajor", "listMajors", "health"],
+      "isSystem": true,
+      "ttlSeconds": 0
+    },
+    "system.auth": {
+      "subject": "cap.system.auth.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Authentication and authorization service",
+      "methods": ["authenticate", "authorize", "validate", "refresh"],
+      "isSystem": true,
+      "ttlSeconds": 0
+    },
+    "system.config": {
+      "subject": "cap.system.config.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Configuration service",
+      "methods": ["get", "set", "list", "watch"],
+      "isSystem": true,
+      "ttlSeconds": 0
+    },
+    "system.health": {
+      "subject": "cap.system.health.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "System health monitoring",
+      "methods": ["check", "status", "metrics"],
+      "isSystem": true,
+      "ttlSeconds": 0
+    },
+    "system.events": {
+      "subject": "cap.system.events.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Event bus service",
+      "methods": ["publish", "subscribe", "unsubscribe"],
+      "isSystem": true,
+      "ttlSeconds": 0
+    },
+    "tool.search": {
+      "subject": "cap.tool.search.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Search tool capability",
+      "methods": ["invoke", "describe", "validate"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "tool.calculator": {
+      "subject": "cap.tool.calculator.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Calculator tool capability",
+      "methods": ["invoke", "describe"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "tool.codegen": {
+      "subject": "cap.tool.codegen.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Code generation tool capability",
+      "methods": ["invoke", "describe", "stream"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "workflow.ingest": {
+      "subject": "cap.workflow.ingest.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Document/workflow ingest workflow",
+      "methods": ["start", "status", "cancel", "describe"],
+      "isSystem": false,
+      "ttlSeconds": 600
+    },
+    "workflow.approval": {
+      "subject": "cap.workflow.approval.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Approval workflow capability",
+      "methods": ["start", "approve", "reject", "status", "describe"],
+      "isSystem": false,
+      "ttlSeconds": 600
+    },
+    "agent.assistant": {
+      "subject": "cap.agent.assistant.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Assistant agent capability",
+      "methods": ["chat", "stream", "describe", "tools"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "agent.summarizer": {
+      "subject": "cap.agent.summarizer.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Summarizer agent capability",
+      "methods": ["summarize", "stream", "describe"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "model.completion": {
+      "subject": "cap.model.completion.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "LLM completion model capability",
+      "methods": ["complete", "stream", "describe", "list"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "model.embedding": {
+      "subject": "cap.model.embedding.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Embedding model capability",
+      "methods": ["embed", "describe", "list"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "prompt.template": {
+      "subject": "cap.prompt.template.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Prompt template capability",
+      "methods": ["render", "list", "describe", "validate"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    },
+    "prompt.chat": {
+      "subject": "cap.prompt.chat.v1",
+      "major": 1,
+      "version": "1.0.0",
+      "status": "active",
+      "description": "Chat prompt / conversation prompt capability",
+      "methods": ["render", "list", "describe"],
+      "isSystem": false,
+      "ttlSeconds": 300
+    }
+  },
+  "aliases": {
+    "registry": "system.registry",
+    "auth": "system.auth",
+    "config": "system.config",
+    "search": "tool.search",
+    "calculator": "tool.calculator",
+    "ingest": "workflow.ingest",
+    "assistant": "agent.assistant",
+    "completion": "model.completion",
+    "embedding": "model.embedding",
+    "template": "prompt.template"
+  },
+  "changeEventSubjects": {
+    "global": "registry.changed",
+    "pattern": "registry.changed.{app}.{capability}"
+  }
+}

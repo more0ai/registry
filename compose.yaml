@@ -1,0 +1,64 @@
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: capabilities-registry-nats
+    restart: unless-stopped
+    command: ["--jetstream", "-m", "8222"]
+    ports:
+      - "${NATS_CLIENT_PORT:-4222}:4222"   # Client connections
+      - "${NATS_MONITOR_PORT:-8222}:8222"  # HTTP monitoring
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/varz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - morezero-infra
+
+  capabilities-registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: capabilities-registry
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      # Database - matches infrastructure/docker-compose.yml postgres service
+      DATABASE_URL: "postgres://${POSTGRES_USER:-morezero}:${POSTGRES_PASSWORD:-morezero_secret}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-morezero}?sslmode=disable"
+
+      # Migrations
+      RUN_MIGRATIONS: "true"
+      MIGRATION_PATH: "/app/migrations"
+
+      # COMMS (standalone NATS)
+      COMMS_URL: "${COMMS_URL:-nats://nats:4222}"
+      SERVICE_NAME: "capabilities-registry"
+
+      # HTTP health endpoint
+      HTTP_PORT: "${HTTP_PORT:-8080}"
+      HEALTH_CHECK_TIMEOUT: "${HEALTH_CHECK_TIMEOUT:-5s}"
+
+      # Registry
+      REGISTRY_REQUEST_TIMEOUT: "${REGISTRY_REQUEST_TIMEOUT:-25s}"
+      REGISTRY_BOOTSTRAP_FILE: "/app/config/bootstrap.json"
+
+      # Logging
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+    ports:
+      - "${CAP_SERVER_HTTP_PORT:-8090}:8080"   # Health endpoint
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - morezero-infra
+
+networks:
+  morezero-infra:
+    external: true
+    name: morezero-infra-network
