@@ -235,7 +235,7 @@ func Run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleHome())
 	mux.HandleFunc("/capability/", s.handleCapabilityDetail())
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		healthCtx, cancel := context.WithTimeout(r.Context(), healthTimeout)
 		defer cancel()
 		h := reg.Health(healthCtx)
@@ -244,13 +244,18 @@ func Run() error {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 		json.NewEncoder(w).Encode(h)
-	})
+	}
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
 
-	httpAddr := fmt.Sprintf(":%d", cfg.HTTPPort)
+	httpAddr := cfg.HTTPAddr
+	if httpAddr == "" {
+		httpAddr = fmt.Sprintf(":%d", cfg.HTTPPort)
+	}
 	s.httpServer = &http.Server{Addr: httpAddr, Handler: mux}
 	go func() {
 		slog.Info(fmt.Sprintf("%s - HTTP health server listening on %s", logPrefix, httpAddr))

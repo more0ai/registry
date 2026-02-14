@@ -30,7 +30,8 @@ type Config struct {
 	RunMigrations  bool   `envconfig:"RUN_MIGRATIONS" default:"false"`
 	MigrationPath string `envconfig:"MIGRATION_PATH" default:"migrations"`
 
-	// HTTP health endpoint
+	// HTTP health endpoint (REGISTRY_HTTP_ADDR preferred, e.g. "0.0.0.0:8080")
+	HTTPAddr          string        `envconfig:"REGISTRY_HTTP_ADDR"`
 	HTTPPort          int           `envconfig:"HTTP_PORT" default:"8080"`
 	HealthCheckTimeout time.Duration `envconfig:"HEALTH_CHECK_TIMEOUT" default:"5s"`
 

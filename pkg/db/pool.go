@@ -40,7 +40,6 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 }
 
 // RunMigrations applies SQL migration files in order.
-// For production use, consider golang-migrate or similar.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, migrationFiles []string) error {
 	slog.Info(fmt.Sprintf("%s - Running %d migrations", logPrefix, len(migrationFiles)))
 
@@ -51,5 +50,37 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, migrationFiles []str
 	}
 
 	slog.Info(fmt.Sprintf("%s - Migrations complete", logPrefix))
+	return nil
+}
+
+// MigrationStatus reports whether migrations have been applied (by checking for capabilities table).
+func MigrationStatus(ctx context.Context, pool *pgxpool.Pool, migrationPath string) error {
+	const statusLogPrefix = "db:MigrationStatus"
+
+	// Check if schema exists (capabilities table is created in first migration)
+	var exists bool
+	err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'capabilities')`).Scan(&exists)
+	if err != nil {
+		return fmt.Errorf("%s - failed to check schema: %w", statusLogPrefix, err)
+	}
+
+	files, err := LoadMigrationFiles(migrationPath)
+	if err != nil {
+		return fmt.Errorf("%s - load migration list: %w", statusLogPrefix, err)
+	}
+
+	if exists {
+		fmt.Printf("Migration status: applied (schema present, %d migration files in %s)\n", len(files), migrationPath)
+	} else {
+		fmt.Printf("Migration status: not applied (run 'registry migrate up'). %d migration files in %s\n", len(files), migrationPath)
+	}
+	return nil
+}
+
+// MigrationDown rolls back the last migration. Current implementation does not support down migrations
+// (migrations are forward-only); this is a no-op with a message.
+func MigrationDown(ctx context.Context, pool *pgxpool.Pool, _ string) error {
+	fmt.Println("Migration down: not supported (migrations are forward-only). Use a database backup to roll back.")
 	return nil
 }

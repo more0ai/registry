@@ -2,25 +2,58 @@
 
 The **Capabilities Registry** is a Go service that implements the **Capability Registry**: it stores and resolves capability metadata (app, name, version, subject, methods) and exposes a request/reply API over NATS. Clients use it to **resolve** capability names to NATS subjects and to **discover** / **describe** capabilities. The registry can run **standalone** (binary or Docker) or be used from Node/TypeScript apps by importing the **capabilities-client** package (in-process client).
 
+**Licensing:** This project is source-available under the **Business Source License 1.1 (BSL 1.1)**. Production use may require a commercial license from more0ai. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
 ---
 
 ## Table of contents
 
-1. [Setup and usage](#1-setup-and-usage)  
+1. [Quickstart (Docker Compose)](#quickstart-docker-compose)  
+2. [Setup and usage](#1-setup-and-usage)  
    - [Database setup](#database-setup)  
+   - [CLI commands (migrate, serve)](#cli-commands)  
    - [Standalone (binary)](#standalone-binary)  
-   - [CLI commands](#cli-commands)  
    - [Standalone (Docker / Compose)](#standalone-docker--compose)  
-   - [Using from Node/TypeScript (import packages, in-process client)](#using-from-nodetypescript-import-packages-in-process-client)  
+   - [Using from Node/TypeScript](#using-from-nodetypescript-import-packages-in-process-client)  
    - [Environment variables](#environment-variables)  
-2. [APIs to interact with the server](#2-apis-to-interact-with-the-server)  
+3. [APIs to interact with the server](#2-apis-to-interact-with-the-server)  
    - [NATS registry API (request/reply)](#nats-registry-api-requestreply)  
    - [HTTP endpoints](#http-endpoints)  
-3. [How it works](#3-how-it-works)  
+4. [Production and versioning](#production-and-versioning)  
+5. [How it works](#3-how-it-works)  
    - [Component overview](#component-overview)  
    - [Component diagrams](#component-diagrams)  
    - [Data flow](#data-flow)  
    - [Bootstrap and subjects](#bootstrap-and-subjects)
+
+---
+
+## Quickstart (Docker Compose)
+
+**Prerequisites:** Docker and Docker Compose.
+
+Run the registry with Postgres and NATS in one command:
+
+```powershell
+cp .env.example .env
+docker compose up -d
+```
+
+Run migrations (required once before the registry is fully usable):
+
+```powershell
+docker compose run --rm registry registry migrate up
+```
+
+Check health:
+
+```powershell
+curl http://localhost:8080/healthz
+```
+
+Or on Windows: `Invoke-WebRequest -Uri http://localhost:8080/healthz`. You should get a JSON response with `"status":"healthy"` when the database is reachable.
+
+**Note:** The default credentials in `.env.example` are for local development only. Do not use them in production.
 
 ---
 
@@ -61,7 +94,7 @@ Use your own password and database name; then set `DATABASE_URL` accordingly (se
 
 Migrations create and update the schema (tables and indexes). You can run them in either of two ways:
 
-- **CLI (recommended for one-off or CI):** `capabilities-registry migrate` — applies migrations and exits. Uses `DATABASE_URL` and `MIGRATION_PATH` from the environment.
+- **CLI (recommended for one-off or CI):** `registry migrate up` (or `capabilities-registry migrate up` when built from repo) — applies migrations and exits. Uses `DATABASE_URL` and `MIGRATION_PATH` from the environment.
 - **At server startup:** set `RUN_MIGRATIONS=true` and `MIGRATION_PATH` (default: `migrations`; in Docker use `/app/migrations`).
 
 Migration files in `migrations/` are applied in alphabetical order. They create:
@@ -101,22 +134,27 @@ Summary:
 
 ### CLI commands
 
-The binary supports subcommands so you can run migrations or clear the database without starting the server.
+The binary (named `registry` in the Docker image) supports subcommands:
 
 | Command | Description |
 |---------|-------------|
-| *(none)* | Start the capabilities registry (default). |
-| `migrate` | Run database migrations only. Connects using `DATABASE_URL`, loads `.sql` files from `MIGRATION_PATH`, applies them in order, then exits. Does not seed bootstrap. |
-| `clear` | Truncate all registry tables; schema is preserved. Uses `DATABASE_URL`. |
-| `seed [file]` | Load capabilities from bootstrap JSON. Optional `file` overrides `REGISTRY_BOOTSTRAP_FILE`; otherwise uses env or `config/bootstrap.json` / `bootstrap.json`. Uses `DATABASE_URL`. |
+| `serve` (default) | Start the registry (NATS, HTTP, registry API). |
+| `migrate up` | Run database migrations. Uses `DATABASE_URL` and `MIGRATION_PATH`. |
+| `migrate status` | Show whether migrations have been applied. |
+| `migrate down` | Optional; current migrations are forward-only (no-op with message). |
+| `clear` | Truncate all registry tables; schema is preserved. |
+| `seed [file]` | Load capabilities from bootstrap JSON. Uses `DATABASE_URL`. |
 | `help` | Print usage. |
+
+**Migration workflow:** Run `registry migrate up` once (or when you add new migrations). Do not rely on auto-running migrations at server startup in production unless you use a single instance or a safe leader/lock strategy; prefer a one-off migrate job.
 
 Examples:
 
 ```powershell
 # Run migrations (set DATABASE_URL and optionally MIGRATION_PATH)
 $env:DATABASE_URL = "postgres://morezero:morezero_secret@localhost:5432/morezero?sslmode=disable"
-.\capabilities-registry.exe migrate
+.\capabilities-registry.exe migrate up
+.\capabilities-registry.exe migrate status
 
 # Clear registry (data only)
 .\capabilities-registry.exe clear
@@ -274,8 +312,9 @@ When `RUN_MIGRATIONS=true`, the server seeds the database from bootstrap. You ca
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HTTP_PORT` | `8080` | Port for the HTTP server (health, ready, registry UI, capability docs). |
-| `HEALTH_CHECK_TIMEOUT` | `5s` | Timeout for health checks (e.g. DB ping) when serving `/health`. |
+| `REGISTRY_HTTP_ADDR` | (none) | Listen address for the HTTP server (e.g. `0.0.0.0:8080`). If unset, `HTTP_PORT` is used. |
+| `HTTP_PORT` | `8080` | Port for the HTTP server when `REGISTRY_HTTP_ADDR` is not set (health, ready, registry UI, capability docs). |
+| `HEALTH_CHECK_TIMEOUT` | `5s` | Timeout for health checks (e.g. DB ping) when serving `/health` and `/healthz`. |
 
 **Logging**
 
@@ -362,10 +401,37 @@ nats req cap.system.registry.v1 '{"id":"test","type":"invoke","cap":"system.regi
 |----------|-------------|
 | `GET /` | Registry home page: health, stats, list of capabilities (HTML) |
 | `GET /health` | JSON health (status, checks.database, timestamp). Returns 503 if unhealthy |
+| `GET /healthz` | Same as `/health` (for readiness probes, e.g. Kubernetes) |
 | `GET /ready` | Simple readiness JSON `{"status":"ready"}` |
 | `GET /capability/<cap>` | Capability detail page (describe output, HTML) |
 | `GET /capability/<cap>/openapi.json` | OpenAPI 3.0 spec for the capability’s methods |
 | `GET /capability/<cap>/docs` | Swagger UI for the capability API |
+
+---
+
+## Production and versioning
+
+### Running in production
+
+- **Docker image:** `ghcr.io/more0ai/registry:<version>` (e.g. `ghcr.io/more0ai/registry:1.2.3`). Tags match Git tags without the `v` prefix (`v1.2.3` → `1.2.3`).
+- **Example run:**
+
+  ```bash
+  docker run -d --name registry \
+    -e DATABASE_URL="postgres://user:pass@host:5432/dbname?sslmode=require" \
+    -e COMMS_URL="nats://nats-host:4222" \
+    -e REGISTRY_HTTP_ADDR="0.0.0.0:8080" \
+    -p 8080:8080 \
+    ghcr.io/more0ai/registry:1.2.3
+  ```
+
+- **Migrations:** Run as a one-off job before or during deployment (e.g. `docker run --rm -e DATABASE_URL=... ghcr.io/more0ai/registry:1.2.3 registry migrate up`). Do not rely on `RUN_MIGRATIONS=true` at server startup in multi-instance setups unless you use a migration lock/leader election.
+- **Kubernetes / ECS:** Use the image as a deployment; add a `livenessProbe` / `readinessProbe` on `GET /healthz` (or `/health`). Run migrations as a Job or init container. Provide `DATABASE_URL` and `COMMS_URL` via secrets or env.
+
+### Versioning
+
+- **Docker tags** are derived from Git tags: pushing tag `v1.2.3` publishes `ghcr.io/more0ai/registry:1.2.3`. We do not push a `latest` tag by default.
+- **Releases:** GitHub Actions build and push the image to GHCR on every `v*` tag and attach binaries (linux/amd64, linux/arm64, darwin/arm64) to the GitHub Release.
 
 ---
 
