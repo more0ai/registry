@@ -19,7 +19,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o /registry \
-    ./cmd/capabilities-registry
+    ./cmd/registry
 
 # Stage 2: Runtime (distroless would require static binary + no shell; Alpine is smaller than full debian and supports non-root)
 FROM alpine:3.20
@@ -38,9 +38,10 @@ COPY --from=builder /registry /app/registry
 COPY LICENSE /app/LICENSE
 COPY NOTICE /app/NOTICE
 
-# Migrations and config (for filesystem fallback and bootstrap)
+# Migrations, config, and capability metadata (for seeding system.registry etc.)
 COPY migrations/ /app/migrations/
 COPY config/ /app/config/
+COPY capabilities/ /app/capabilities/
 
 # Owned by appuser
 RUN chown -R appuser:appgroup /app
@@ -66,3 +67,15 @@ LABEL org.opencontainers.image.source="https://github.com/more0ai/registry" \
 # Default: serve. Override to run migrations: registry migrate up
 ENTRYPOINT ["/app/registry"]
 CMD ["serve"]
+
+# -----------------------------------------------------------------------------
+# Stage: test (run unit + integration tests inside container)
+# Usage: docker compose run --rm test
+# Requires: Postgres reachable (POSTGRES_HOST, etc.); creates registry_test via ensure-db.
+# -----------------------------------------------------------------------------
+FROM builder AS test
+
+RUN apk add --no-cache bash
+
+# Binary from builder is at /registry; ensure-db creates registry_test on same host as DATABASE_URL
+CMD ["sh", "-c", "/registry ensure-db && go test ./... && go test -tags=integration ./..."]

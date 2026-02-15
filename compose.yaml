@@ -1,7 +1,11 @@
+# Capabilities registry and NATS.
+# - Uses platform Postgres (platform/compose.yaml): start platform first (e.g. platform/start.ps1).
+# - NATS lives here (not in platform) and is used by the registry and its clients (API, playground, SDK).
+# - Database: this app uses DB name registry; the server creates it on startup if missing (platform Postgres).
 services:
   nats:
     image: nats:2.10-alpine
-    container_name: capabilities-registry-nats
+    container_name: more0ai-nats
     restart: unless-stopped
     command: ["--jetstream", "-m", "8222"]
     ports:
@@ -14,20 +18,20 @@ services:
       retries: 3
       start_period: 5s
     networks:
-      - morezero-infra
+      - more0ai-infra
 
-  capabilities-registry:
+  registry:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: capabilities-registry
+    container_name: more0ai-registry
     restart: unless-stopped
     depends_on:
       nats:
         condition: service_healthy
     environment:
-      # Database - matches infrastructure/docker-compose.yml postgres service
-      DATABASE_URL: "postgres://${POSTGRES_USER:-morezero}:${POSTGRES_PASSWORD:-morezero_secret}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-morezero}?sslmode=disable"
+      # Database: platform Postgres (start platform first). Server creates DB if missing.
+      DATABASE_URL: "postgres://${POSTGRES_USER:-morezero}:${POSTGRES_PASSWORD:-morezero}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-registry}?sslmode=disable"
 
       # Migrations
       RUN_MIGRATIONS: "true"
@@ -35,7 +39,9 @@ services:
 
       # COMMS (standalone NATS)
       COMMS_URL: "${COMMS_URL:-nats://nats:4222}"
-      SERVICE_NAME: "capabilities-registry"
+      # URL returned to clients at GET /connection (host-visible NATS; when empty, COMMS_URL is used)
+      NATS_CLIENT_URL: "${NATS_CLIENT_URL:-nats://127.0.0.1:4222}"
+      SERVICE_NAME: "more0ai-registry"
 
       # HTTP health endpoint
       HTTP_PORT: "${HTTP_PORT:-8080}"
@@ -48,7 +54,7 @@ services:
       # Logging
       LOG_LEVEL: "${LOG_LEVEL:-info}"
     ports:
-      - "${CAP_SERVER_HTTP_PORT:-8090}:8080"   # Health endpoint
+      - "${CAP_SERVER_HTTP_PORT:-8080}:8080"   # Health endpoint
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
       interval: 10s
@@ -56,9 +62,22 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - morezero-infra
+      - more0ai-infra
+
+  # Run tests inside container (uses platform Postgres; creates registry_test via ensure-db).
+  # Usage: docker compose run --rm test
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-morezero}:${POSTGRES_PASSWORD:-morezero}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5432}/registry_test?sslmode=disable"
+    command: ["sh", "-c", "/registry ensure-db && go test ./... && go test -tags=integration ./..."]
+    networks:
+      - more0ai-infra
 
 networks:
-  morezero-infra:
+  more0ai-infra:
     external: true
-    name: morezero-infra-network
+    name: more0ai-infra-network

@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"path/filepath"
 
 	"github.com/morezero/capabilities-registry/internal/config"
 	"github.com/morezero/capabilities-registry/internal/server"
@@ -17,16 +19,18 @@ const usage = `Usage: registry [command]
        registry migrate up          Run database migrations.
        registry migrate down        Roll back one migration (optional; not all migrations support down).
        registry migrate status      Show migration status.
+       registry ensure-db [name]    Create database if missing (default name: registry_test). Uses DATABASE_URL host/user.
        registry clear               Truncate all registry tables; schema is preserved.
-       registry seed [file]         Load capabilities from bootstrap JSON.
+       registry seed [file]         Seed from capabilities metadata (e.g. registry/capabilities/metadata.json).
 
 Commands:
   serve           (default) Start the capabilities registry.
   migrate up      Run database migrations only.
   migrate down    Roll back last migration (optional).
   migrate status  Show current migration status.
+  ensure-db [name] Create database (e.g. registry_test) on same host as DATABASE_URL; then run tests with that URL.
   clear           Truncate registry data; schema preserved.
-  seed [file]     Seed from REGISTRY_BOOTSTRAP_FILE or optional file.
+  seed [file]     Seed from capabilities metadata (path derived from bootstrap file or REGISTRY_BOOTSTRAP_FILE).
 
 Environment: DATABASE_URL (required), MIGRATION_PATH, REGISTRY_HTTP_ADDR (default 0.0.0.0:8080), REGISTRY_BOOTSTRAP_FILE. See README.
 `
@@ -75,6 +79,15 @@ func main() {
 			log.Fatalf("registry seed: %v", err)
 		}
 		return
+	case "ensure-db":
+		dbName := "registry_test"
+		if len(args) > 1 && args[1] != "" {
+			dbName = args[1]
+		}
+		if err := runEnsureDB(dbName); err != nil {
+			log.Fatalf("registry ensure-db: %v", err)
+		}
+		return
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		return
@@ -95,6 +108,9 @@ func runMigrateUp() error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if err := cfg.ValidateForDB(); err != nil {
+		return err
 	}
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
@@ -118,6 +134,9 @@ func runMigrateStatus() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if err := cfg.ValidateForDB(); err != nil {
+		return err
+	}
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -132,6 +151,9 @@ func runMigrateDown() error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if err := cfg.ValidateForDB(); err != nil {
+		return err
 	}
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
@@ -148,6 +170,9 @@ func runClear() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	if err := cfg.ValidateForDB(); err != nil {
+		return err
+	}
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -161,10 +186,36 @@ func runClear() error {
 	return nil
 }
 
+func runEnsureDB(dbName string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
+	u, err := url.Parse(cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	// Replace path with target database name; query (e.g. sslmode) is kept on u.RawQuery.
+	u.Path = "/" + dbName
+	targetURL := u.String()
+	ctx := context.Background()
+	if err := db.EnsureDatabase(ctx, targetURL); err != nil {
+		return err
+	}
+	fmt.Printf("Database %q is ready.\n", dbName)
+	return nil
+}
+
 func runSeed(bootstrapFileOverride string) error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if err := cfg.ValidateForDB(); err != nil {
+		return err
 	}
 	bootstrapPath := bootstrapFileOverride
 	if bootstrapPath == "" {
@@ -177,8 +228,15 @@ func runSeed(bootstrapFileOverride string) error {
 	}
 	defer pool.Close()
 
-	if err := db.SeedBootstrap(ctx, pool, bootstrapPath); err != nil {
-		return fmt.Errorf("seed bootstrap: %w", err)
+	// Seed capability metadata from registry/capabilities/metadata.json (e.g. system.registry).
+	// Bootstrap file is not used for seeding; bootstrap response is built from DB.
+	metadataPath := filepath.Clean(filepath.Join(filepath.Dir(bootstrapPath), "..", "capabilities", "metadata.json"))
+	baseDir := ""
+	if bootstrapFileOverride != "" {
+		baseDir, _ = os.Getwd()
+	}
+	if err := db.SeedFromCapabilityMetadataFile(ctx, pool, metadataPath, baseDir); err != nil {
+		return fmt.Errorf("seed capability metadata: %w", err)
 	}
 	return nil
 }

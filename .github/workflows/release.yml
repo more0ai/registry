@@ -63,9 +63,9 @@ jobs:
 
       - name: Build binaries
         run: |
-          GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o registry_linux_amd64 ./cmd/capabilities-registry
-          GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o registry_linux_arm64 ./cmd/capabilities-registry
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o registry_darwin_arm64 ./cmd/capabilities-registry
+          GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o registry_linux_amd64 ./cmd/registry
+          GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o registry_linux_arm64 ./cmd/registry
+          GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o registry_darwin_arm64 ./cmd/registry
 
       - name: Checksums
         run: |

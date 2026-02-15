@@ -264,5 +264,8 @@ func jsonBytesToMap(data []byte) map[string]interface{} {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return map[string]interface{}{}
 	}
+	if m == nil {
+		return map[string]interface{}{}
+	}
 	return m
 }

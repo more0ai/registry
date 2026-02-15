@@ -295,6 +295,91 @@ func TestRegistryRequest_AllMethods(t *testing.T) {
 	}
 }
 
+// TestDispatch_WithNilRepoRegistry verifies that each method returns INTERNAL_ERROR when registry has nil repo.
+func TestDispatch_WithNilRepoRegistry(t *testing.T) {
+	reg := registry.NewRegistry(registry.NewRegistryParams{
+		Repo: nil, Publisher: nil, Config: registry.DefaultConfig(),
+	})
+	disp := NewDispatcher(reg)
+	ctx := context.Background()
+
+	tests := []struct {
+		method string
+		params string
+	}{
+		{"resolve", `{"cap":"more0.test"}`},
+		{"discover", `{"page":1,"limit":10}`},
+		{"describe", `{"cap":"more0.test"}`},
+		{"listMajors", `{"cap":"more0.test"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			resp := disp.Dispatch(ctx, &RegistryRequest{
+				ID: "req-1", Method: tt.method, Params: json.RawMessage(tt.params),
+			})
+			if resp.Ok {
+				t.Errorf("dispatcher:dispatch_routing_test - expected Ok=false for %s with nil repo", tt.method)
+			}
+			if resp.Error == nil {
+				t.Fatalf("dispatcher:dispatch_routing_test - expected error for %s", tt.method)
+			}
+			if resp.Error.Code != "INTERNAL_ERROR" {
+				t.Errorf("dispatcher:dispatch_routing_test - %s: Code = %q, want INTERNAL_ERROR", tt.method, resp.Error.Code)
+			}
+		})
+	}
+}
+
+// TestDispatch_Health_WithNilRepoRegistry verifies health returns Ok with unhealthy status when repo is nil.
+func TestDispatch_Health_WithNilRepoRegistry(t *testing.T) {
+	reg := registry.NewRegistry(registry.NewRegistryParams{
+		Repo: nil, Publisher: nil, Config: registry.DefaultConfig(),
+	})
+	disp := NewDispatcher(reg)
+	ctx := context.Background()
+	resp := disp.Dispatch(ctx, &RegistryRequest{
+		ID: "req-1", Method: "health", Params: json.RawMessage(`{}`),
+	})
+	if !resp.Ok {
+		t.Errorf("dispatcher:dispatch_routing_test - health with nil repo should return Ok=true (result has status unhealthy)")
+	}
+	if resp.Error != nil {
+		t.Errorf("dispatcher:dispatch_routing_test - health should not return error")
+	}
+	if resp.Result == nil {
+		t.Fatal("dispatcher:dispatch_routing_test - health should return result")
+	}
+	out, ok := resp.Result.(*registry.HealthOutput)
+	if !ok {
+		t.Fatalf("dispatcher:dispatch_routing_test - health result type = %T, want *registry.HealthOutput", resp.Result)
+	}
+	if out.Status != "unhealthy" {
+		t.Errorf("dispatcher:dispatch_routing_test - health result status = %q, want unhealthy", out.Status)
+	}
+}
+
+// TestDispatch_InvalidParams_ReturnsINVALID_ARGUMENT verifies bad JSON params yield INVALID_ARGUMENT.
+func TestDispatch_InvalidParams_ReturnsINVALID_ARGUMENT(t *testing.T) {
+	reg := registry.NewRegistry(registry.NewRegistryParams{
+		Repo: nil, Publisher: nil, Config: registry.DefaultConfig(),
+	})
+	disp := NewDispatcher(reg)
+	ctx := context.Background()
+
+	resp := disp.Dispatch(ctx, &RegistryRequest{
+		ID: "req-1", Method: "resolve", Params: json.RawMessage(`{invalid json`),
+	})
+	if resp.Ok {
+		t.Error("dispatcher:dispatch_routing_test - expected Ok=false for invalid params")
+	}
+	if resp.Error == nil {
+		t.Fatal("dispatcher:dispatch_routing_test - expected error")
+	}
+	if resp.Error.Code != "INVALID_ARGUMENT" {
+		t.Errorf("dispatcher:dispatch_routing_test - Code = %q, want INVALID_ARGUMENT", resp.Error.Code)
+	}
+}
+
 func TestInvocationContext_JSON(t *testing.T) {
 	raw := `{
 		"tenantId": "t-1",

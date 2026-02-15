@@ -210,6 +210,13 @@ func TestE2E_HealthCheck(t *testing.T) {
 	if health.Timestamp == "" {
 		t.Error("e2e_test - expected non-empty timestamp")
 	}
+	// With nil repo, status should be unhealthy and Database check false
+	if health.Status != "unhealthy" {
+		t.Errorf("e2e_test - health status = %q, want unhealthy (no DB)", health.Status)
+	}
+	if health.Checks.Database {
+		t.Error("e2e_test - health.Checks.Database should be false when repo is nil")
+	}
 }
 
 func TestE2E_ResolveWithoutDB(t *testing.T) {
@@ -553,5 +560,64 @@ func TestE2E_ListMajorsWithoutDB(t *testing.T) {
 
 	if resp.Ok {
 		t.Error("e2e_test - expected Ok=false (no DB)")
+	}
+}
+
+func TestE2E_DisableWithoutDB(t *testing.T) {
+	env := setupE2E(t)
+
+	params := map[string]interface{}{
+		"cap":    "more0.doc.ingest",
+		"major": 1,
+		"reason": "Security issue",
+	}
+	paramsJSON, _ := json.Marshal(params)
+
+	req := &dispatcher.RegistryRequest{
+		ID:     "e2e-disable-1",
+		Method: "disable",
+		Params: json.RawMessage(paramsJSON),
+		Ctx:    &dispatcher.InvocationContext{UserID: "admin"},
+	}
+
+	resp := sendRequest(t, env.nc, req)
+
+	if resp.Ok {
+		t.Error("e2e_test - expected Ok=false (no DB)")
+	}
+	if resp.Error == nil {
+		t.Fatal("e2e_test - expected error")
+	}
+}
+
+func TestE2E_HealthResultShape(t *testing.T) {
+	env := setupE2E(t)
+
+	req := &dispatcher.RegistryRequest{
+		ID:     "e2e-health-shape",
+		Method: "health",
+		Params: json.RawMessage(`{}`),
+	}
+	resp := sendRequest(t, env.nc, req)
+
+	if !resp.Ok || resp.Result == nil {
+		t.Fatalf("e2e_test - health request failed or nil result: %v", resp.Error)
+	}
+
+	// Verify result is valid JSON object with expected keys
+	resultJSON, _ := json.Marshal(resp.Result)
+	var m map[string]interface{}
+	if err := json.Unmarshal(resultJSON, &m); err != nil {
+		t.Fatalf("e2e_test - health result not valid JSON: %v", err)
+	}
+	for _, key := range []string{"status", "checks", "timestamp"} {
+		if _, ok := m[key]; !ok {
+			t.Errorf("e2e_test - health result missing key %q", key)
+		}
+	}
+	if checks, ok := m["checks"].(map[string]interface{}); ok {
+		if _, ok := checks["database"]; !ok {
+			t.Error("e2e_test - health.checks missing database key")
+		}
 	}
 }

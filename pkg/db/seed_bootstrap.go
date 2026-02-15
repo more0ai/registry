@@ -3,6 +3,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -94,13 +95,38 @@ func SeedBootstrap(ctx context.Context, pool *pgxpool.Pool, bootstrapFilePath st
 			return fmt.Errorf("%s - get version id %s: %w", seedBootstrapLogPrefix, capRef, err)
 		}
 
-		// 4. Insert methods
+		// 4. Insert methods (with optional metadata from methodsMetadata)
 		for _, methodName := range cap.Methods {
+			meta := cap.MethodsMetadata[methodName]
+			var descPtr *string
+			if meta.Description != "" {
+				descPtr = &meta.Description
+			}
+			inputJSON := mustMarshalJSON(meta.InputSchema, []byte("{}"))
+			outputJSON := mustMarshalJSON(meta.OutputSchema, []byte("{}"))
+			modes := meta.Modes
+			if len(modes) == 0 {
+				modes = []string{"sync"}
+			}
+			tags := meta.Tags
+			if tags == nil {
+				tags = []string{}
+			}
+			examplesJSON := mustMarshalJSON(meta.Examples, []byte("[]"))
+
 			_, err = tx.Exec(ctx,
-				`INSERT INTO capability_methods (version_id, name, created_by, modified_by)
-				 VALUES ($1::uuid, $2, $3::uuid, $3::uuid)
-				 ON CONFLICT (version_id, name) DO NOTHING`,
-				versionID, methodName, systemUserID)
+				`INSERT INTO capability_methods (version_id, name, description, input_schema, output_schema, tags, policies, examples, modes, created_by, modified_by)
+				 VALUES ($1::uuid, $2, $3, $4, $5, $6, '{}'::jsonb, $7, $8, $9::uuid, $9::uuid)
+				 ON CONFLICT (version_id, name) DO UPDATE SET
+				   description = COALESCE(NULLIF(EXCLUDED.description, ''), capability_methods.description),
+				   input_schema = EXCLUDED.input_schema,
+				   output_schema = EXCLUDED.output_schema,
+				   tags = EXCLUDED.tags,
+				   examples = EXCLUDED.examples,
+				   modes = EXCLUDED.modes,
+				   modified = NOW(),
+				   modified_by = EXCLUDED.modified_by`,
+				versionID, methodName, descPtr, inputJSON, outputJSON, tags, examplesJSON, modes, systemUserID)
 			if err != nil {
 				return fmt.Errorf("%s - insert method %s.%s: %w", seedBootstrapLogPrefix, capRef, methodName, err)
 			}
@@ -131,4 +157,16 @@ func parseCapRef(capRef string) (app, name string) {
 		return "", ""
 	}
 	return parts[0], parts[1]
+}
+
+// mustMarshalJSON marshals v to JSON; returns defaultJSON if v is nil or marshaling fails.
+func mustMarshalJSON(v interface{}, defaultJSON []byte) []byte {
+	if v == nil {
+		return defaultJSON
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return defaultJSON
+	}
+	return b
 }

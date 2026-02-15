@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -145,10 +146,18 @@ func (fp *FederationPool) Resolve(ctx context.Context, input *FederatedResolveIn
 		return nil, &RegistryError{Code: "INTERNAL_ERROR", Message: fmt.Sprintf("Failed to decode remote resolve result from %s: %v", input.Alias, err)}
 	}
 
+	// Align with local resolve format: cap:@alias/app/name@version (app and name as separate path segments)
+	app, name := input.Cap, ""
+	if idx := strings.Index(input.Cap, "/"); idx >= 0 {
+		app = input.Cap[:idx]
+		name = input.Cap[idx+1:]
+	}
+	canonicalIdentity := fmt.Sprintf("cap:@%s/%s/%s@%s", input.Alias, app, name, remoteResult.ResolvedVersion)
+
 	return &FederatedResolveOutput{
 		NatsUrl:           *entry.NatsUrl,
 		Subject:           remoteResult.Subject,
-		CanonicalIdentity: fmt.Sprintf("cap:@%s/%s@%s", input.Alias, input.Cap, remoteResult.ResolvedVersion),
+		CanonicalIdentity: canonicalIdentity,
 		ResolvedVersion:   remoteResult.ResolvedVersion,
 		Major:             remoteResult.Major,
 		Status:            remoteResult.Status,

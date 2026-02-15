@@ -10,7 +10,11 @@ import (
 	"github.com/morezero/capabilities-registry/pkg/semver"
 )
 
-const discoverLogPrefix = "registry:discover"
+const (
+	discoverLogPrefix   = "registry:discover"
+	discoverDefaultLimit = 20
+	discoverMaxLimit     = 500
+)
 
 // Discover lists capabilities matching filters.
 func (r *Registry) Discover(ctx context.Context, input *DiscoverInput) (*DiscoverOutput, error) {
@@ -26,7 +30,10 @@ func (r *Registry) Discover(ctx context.Context, input *DiscoverInput) (*Discove
 	}
 	limit := input.Limit
 	if limit < 1 {
-		limit = 20
+		limit = discoverDefaultLimit
+	}
+	if limit > discoverMaxLimit {
+		limit = discoverMaxLimit
 	}
 
 	status := input.Status

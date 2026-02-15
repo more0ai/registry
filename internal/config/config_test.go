@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -145,5 +146,69 @@ func TestLoadConfig_LogLevels(t *testing.T) {
 		if cfg.LogLevel != level {
 			t.Errorf("config:config_test - LogLevel = %q, want %q", cfg.LogLevel, level)
 		}
+	}
+}
+
+func TestValidateForServe_EmptyDatabaseURL(t *testing.T) {
+	cfg := &Config{DatabaseURL: "", RequestTimeout: 5 * time.Second, HealthCheckTimeout: 5 * time.Second}
+	err := cfg.ValidateForServe()
+	if err == nil {
+		t.Fatal("config:config_test - expected error for empty DATABASE_URL")
+	}
+	if !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Errorf("config:config_test - error should mention DATABASE_URL, got %v", err)
+	}
+}
+
+func TestValidateForServe_ZeroRequestTimeout(t *testing.T) {
+	cfg := &Config{DatabaseURL: "postgres://localhost/db", RequestTimeout: 0, HealthCheckTimeout: 5 * time.Second}
+	err := cfg.ValidateForServe()
+	if err == nil {
+		t.Fatal("config:config_test - expected error for zero REGISTRY_REQUEST_TIMEOUT")
+	}
+	if !strings.Contains(err.Error(), "REGISTRY_REQUEST_TIMEOUT") {
+		t.Errorf("config:config_test - error should mention REGISTRY_REQUEST_TIMEOUT, got %v", err)
+	}
+}
+
+func TestValidateForServe_ZeroHealthCheckTimeout(t *testing.T) {
+	cfg := &Config{DatabaseURL: "postgres://localhost/db", RequestTimeout: 5 * time.Second, HealthCheckTimeout: 0}
+	err := cfg.ValidateForServe()
+	if err == nil {
+		t.Fatal("config:config_test - expected error for zero HEALTH_CHECK_TIMEOUT")
+	}
+	if !strings.Contains(err.Error(), "HEALTH_CHECK_TIMEOUT") {
+		t.Errorf("config:config_test - error should mention HEALTH_CHECK_TIMEOUT, got %v", err)
+	}
+}
+
+func TestValidateForServe_Valid(t *testing.T) {
+	cfg := &Config{
+		DatabaseURL:        "postgres://localhost/db",
+		RequestTimeout:      10 * time.Second,
+		HealthCheckTimeout:  5 * time.Second,
+	}
+	err := cfg.ValidateForServe()
+	if err != nil {
+		t.Errorf("config:config_test - expected nil for valid config, got %v", err)
+	}
+}
+
+func TestValidateForDB_EmptyDatabaseURL(t *testing.T) {
+	cfg := &Config{DatabaseURL: ""}
+	err := cfg.ValidateForDB()
+	if err == nil {
+		t.Fatal("config:config_test - expected error for empty DATABASE_URL")
+	}
+	if !strings.Contains(err.Error(), "DATABASE_URL") {
+		t.Errorf("config:config_test - error should mention DATABASE_URL, got %v", err)
+	}
+}
+
+func TestValidateForDB_Valid(t *testing.T) {
+	cfg := &Config{DatabaseURL: "postgres://localhost/db"}
+	err := cfg.ValidateForDB()
+	if err != nil {
+		t.Errorf("config:config_test - expected nil for valid config, got %v", err)
 	}
 }

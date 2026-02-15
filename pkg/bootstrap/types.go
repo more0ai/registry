@@ -1,17 +1,29 @@
 // Package bootstrap provides bootstrap configuration loading for system capabilities.
 package bootstrap
 
+// BootstrapMethodMetadata holds optional per-method metadata (description, schemas, modes, tags, examples).
+// When present in bootstrap, this metadata is persisted so describe returns full method details.
+type BootstrapMethodMetadata struct {
+	Description  string                 `json:"description,omitempty"`
+	InputSchema  map[string]interface{} `json:"inputSchema,omitempty"`
+	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"`
+	Modes        []string               `json:"modes,omitempty"`
+	Tags         []string               `json:"tags,omitempty"`
+	Examples     []interface{}          `json:"examples,omitempty"`
+}
+
 // BootstrapCapability is a system capability entry in the bootstrap config.
 type BootstrapCapability struct {
-	Subject     string   `json:"subject"`
-	NatsUrl     string   `json:"natsUrl,omitempty"`
-	Major       int      `json:"major"`
-	Version     string   `json:"version"`
-	Status      string   `json:"status"`
-	Description string   `json:"description,omitempty"`
-	Methods     []string `json:"methods"`
-	IsSystem    bool     `json:"isSystem"`
-	TTLSeconds  int      `json:"ttlSeconds"`
+	Subject          string                           `json:"subject"`
+	NatsUrl          string                           `json:"natsUrl,omitempty"`
+	Major            int                              `json:"major"`
+	Version          string                           `json:"version"`
+	Status           string                           `json:"status"`
+	Description      string                           `json:"description,omitempty"`
+	Methods          []string                         `json:"methods"`
+	MethodsMetadata  map[string]BootstrapMethodMetadata `json:"methodsMetadata,omitempty"`
+	IsSystem         bool                             `json:"isSystem"`
+	TTLSeconds       int                              `json:"ttlSeconds"`
 }
 
 // BootstrapAliasEntry provides NATS URL information for a known registry alias.

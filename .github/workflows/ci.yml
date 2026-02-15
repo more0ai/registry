@@ -9,6 +9,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -27,8 +41,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Run tests
+      - name: Run unit and e2e tests
         run: go test ./...
+
+      - name: Run integration tests
+        run: go test -tags=integration -count=1 ./pkg/db/... ./tests/...
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/test?sslmode=disable
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v4
@@ -36,4 +55,4 @@ jobs:
           version: latest
 
       - name: Build
-        run: go build -o /dev/null ./cmd/capabilities-registry
+        run: go build -o /dev/null ./cmd/registry

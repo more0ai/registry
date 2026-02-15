@@ -47,6 +47,26 @@
       "status": "active",
       "description": "System health monitoring",
       "methods": ["check", "status", "metrics"],
+      "methodsMetadata": {
+        "check": {
+          "description": "Run health checks",
+          "inputSchema": { "type": "object", "properties": {} },
+          "outputSchema": { "type": "object", "properties": { "status": { "type": "string" }, "checks": { "type": "object" } } },
+          "modes": ["sync"]
+        },
+        "status": {
+          "description": "Get health status",
+          "inputSchema": { "type": "object" },
+          "outputSchema": { "type": "object" },
+          "modes": ["sync"]
+        },
+        "metrics": {
+          "description": "Get health metrics",
+          "inputSchema": { "type": "object" },
+          "outputSchema": { "type": "object" },
+          "modes": ["sync"]
+        }
+      },
       "isSystem": true,
       "ttlSeconds": 0
     },
@@ -59,116 +79,6 @@
       "methods": ["publish", "subscribe", "unsubscribe"],
       "isSystem": true,
       "ttlSeconds": 0
-    },
-    "tool.search": {
-      "subject": "cap.tool.search.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Search tool capability",
-      "methods": ["invoke", "describe", "validate"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "tool.calculator": {
-      "subject": "cap.tool.calculator.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Calculator tool capability",
-      "methods": ["invoke", "describe"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "tool.codegen": {
-      "subject": "cap.tool.codegen.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Code generation tool capability",
-      "methods": ["invoke", "describe", "stream"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "workflow.ingest": {
-      "subject": "cap.workflow.ingest.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Document/workflow ingest workflow",
-      "methods": ["start", "status", "cancel", "describe"],
-      "isSystem": false,
-      "ttlSeconds": 600
-    },
-    "workflow.approval": {
-      "subject": "cap.workflow.approval.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Approval workflow capability",
-      "methods": ["start", "approve", "reject", "status", "describe"],
-      "isSystem": false,
-      "ttlSeconds": 600
-    },
-    "agent.assistant": {
-      "subject": "cap.agent.assistant.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Assistant agent capability",
-      "methods": ["chat", "stream", "describe", "tools"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "agent.summarizer": {
-      "subject": "cap.agent.summarizer.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Summarizer agent capability",
-      "methods": ["summarize", "stream", "describe"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "model.completion": {
-      "subject": "cap.model.completion.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "LLM completion model capability",
-      "methods": ["complete", "stream", "describe", "list"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "model.embedding": {
-      "subject": "cap.model.embedding.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Embedding model capability",
-      "methods": ["embed", "describe", "list"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "prompt.template": {
-      "subject": "cap.prompt.template.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Prompt template capability",
-      "methods": ["render", "list", "describe", "validate"],
-      "isSystem": false,
-      "ttlSeconds": 300
-    },
-    "prompt.chat": {
-      "subject": "cap.prompt.chat.v1",
-      "major": 1,
-      "version": "1.0.0",
-      "status": "active",
-      "description": "Chat prompt / conversation prompt capability",
-      "methods": ["render", "list", "describe"],
-      "isSystem": false,
-      "ttlSeconds": 300
     }
   },
   "aliases": {

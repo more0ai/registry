@@ -9,18 +9,19 @@ The **Capabilities Registry** is a Go service that implements the **Capability R
 ## Table of contents
 
 1. [Quickstart (Docker Compose)](#quickstart-docker-compose)  
-2. [Setup and usage](#1-setup-and-usage)  
+2. [Testing](#testing)  
+3. [Setup and usage](#1-setup-and-usage)  
    - [Database setup](#database-setup)  
    - [CLI commands (migrate, serve)](#cli-commands)  
    - [Standalone (binary)](#standalone-binary)  
    - [Standalone (Docker / Compose)](#standalone-docker--compose)  
    - [Using from Node/TypeScript](#using-from-nodetypescript-import-packages-in-process-client)  
    - [Environment variables](#environment-variables)  
-3. [APIs to interact with the server](#2-apis-to-interact-with-the-server)  
+4. [APIs to interact with the server](#2-apis-to-interact-with-the-server)  
    - [NATS registry API (request/reply)](#nats-registry-api-requestreply)  
    - [HTTP endpoints](#http-endpoints)  
-4. [Production and versioning](#production-and-versioning)  
-5. [How it works](#3-how-it-works)  
+5. [Production and versioning](#production-and-versioning)  
+6. [How it works](#3-how-it-works)  
    - [Component overview](#component-overview)  
    - [Component diagrams](#component-diagrams)  
    - [Data flow](#data-flow)  
@@ -57,6 +58,28 @@ Or on Windows: `Invoke-WebRequest -Uri http://localhost:8080/healthz`. You shoul
 
 ---
 
+## Testing
+
+The registry has **unit**, **integration**, and **e2e** tests. The app uses **platform** resources (Postgres); see `platform/compose.yaml`.
+
+- **Unit and e2e (no DB):** Run from the registry directory:
+  ```powershell
+  go test ./...
+  ```
+  This runs all unit tests and e2e tests that use an embedded NATS server (no PostgreSQL required).
+
+- **Integration tests (with DB), automated:** With **platform** running, use the script to set up the test DB, run tests, and tear it down:
+  ```powershell
+  .\scripts\run-integration-tests.ps1
+  ```
+  The script ensures `registry_test` exists on platform Postgres (via docker exec), runs `go test -tags=integration ./...`, then drops `registry_test` when done. No manual DB setup or `psql` on the host required.
+
+  Integration tests:
+  - **`pkg/db`** – Repository against a real database (migrations are applied in test).
+  - **`tests`** – Full flow: NATS + dispatcher + registry + DB (upsert, resolve, discover, describe, health, listMajors).
+
+---
+
 ## 1. Setup and usage
 
 ### Prerequisites
@@ -89,6 +112,8 @@ psql -U postgres -c "CREATE DATABASE morezero OWNER morezero;"
 ```
 
 Use your own password and database name; then set `DATABASE_URL` accordingly (see [Environment variables](#environment-variables)).
+
+**When using platform Postgres:** the user and server already exist. The registry **creates its database automatically** on startup if it does not exist (so you can start the app without running a script). To create both `registry` and `registry_test` manually (e.g. for a one-off integration test run without the script), run `.\scripts\ensure-databases.ps1` or pipe `scripts/ensure-databases.sql` into the platform Postgres container.
 
 #### 2. Run migrations
 
@@ -200,7 +225,7 @@ $env:REGISTRY_BOOTSTRAP_FILE = "config\bootstrap.json"
 
 ### Standalone (Docker / Compose)
 
-- **Build and run** with the included Compose file. It expects a network `morezero-infra-network` and uses `POSTGRES_*` / `COMMS_*` / `HTTP_PORT` style env vars (see `compose.yaml`).
+- **Build and run** with the included Compose file. It expects a network `more0ai-infra-network` (create it by starting platform first) and uses `POSTGRES_*` / `COMMS_*` / `HTTP_PORT` style env vars (see `compose.yaml`).
 
   ```powershell
   docker compose -f compose.yaml up -d

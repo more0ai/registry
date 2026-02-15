@@ -11,7 +11,10 @@ import (
 
 const describeLogPrefix = "registry:describe"
 
-// Describe returns detailed information about a capability version.
+// Describe returns full details for a capability version, including capability-level
+// metadata (cap, app, name, description, version, major, status, tags, changelog) and
+// for each method full metadata: name, description, inputSchema, outputSchema (JSON schemas),
+// modes, tags, and examples.
 func (r *Registry) Describe(ctx context.Context, input *DescribeInput) (*DescribeOutput, error) {
 	slog.Info(fmt.Sprintf("%s - cap=%s", describeLogPrefix, input.Cap))
 

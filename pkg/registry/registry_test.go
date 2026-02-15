@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"testing"
 
 	"github.com/morezero/capabilities-registry/pkg/events"
@@ -224,5 +225,61 @@ func TestGetEnv_CustomDefaultEnv(t *testing.T) {
 	got = reg.getEnv(&ResolutionContext{Env: "staging"})
 	if got != "staging" {
 		t.Errorf("registry:registry_test - getEnv(staging) = %q, want %q", got, "staging")
+	}
+}
+
+func TestClose_NoPanic(t *testing.T) {
+	// Registry with nil repo has nil federationPool
+	reg := NewRegistry(NewRegistryParams{
+		Repo:      nil,
+		Publisher: nil,
+		Config:    DefaultConfig(),
+	})
+	reg.Close()
+	// No panic
+}
+
+func TestRequireRepo_ReturnsErrorWhenNil(t *testing.T) {
+	reg := NewRegistry(NewRegistryParams{
+		Repo:      nil,
+		Publisher: nil,
+		Config:    DefaultConfig(),
+	})
+	err := reg.requireRepo()
+	if err == nil {
+		t.Fatal("registry:registry_test - expected error when repo is nil")
+	}
+	if err.Code != "INTERNAL_ERROR" {
+		t.Errorf("registry:registry_test - Code = %q, want INTERNAL_ERROR", err.Code)
+	}
+}
+
+func TestGetBootstrapCapabilities_NilRepo_ReturnsEmpty(t *testing.T) {
+	reg := NewRegistry(NewRegistryParams{Repo: nil, Publisher: nil, Config: DefaultConfig()})
+	ctx := context.Background()
+	out, err := reg.GetBootstrapCapabilities(ctx, "production", false, false)
+	if err != nil {
+		t.Fatalf("registry:registry_test - unexpected error: %v", err)
+	}
+	if out == nil {
+		t.Fatal("registry:registry_test - expected non-nil map")
+	}
+	if len(out) != 0 {
+		t.Errorf("registry:registry_test - expected empty map, got %d entries", len(out))
+	}
+}
+
+func TestLoadRegistryAliases_NilFederationPool_ReturnsDefaultAlias(t *testing.T) {
+	reg := NewRegistry(NewRegistryParams{Repo: nil, Publisher: nil, Config: DefaultConfig()})
+	ctx := context.Background()
+	aliases, defaultAlias, err := reg.LoadRegistryAliases(ctx)
+	if err != nil {
+		t.Fatalf("registry:registry_test - unexpected error: %v", err)
+	}
+	if aliases != nil {
+		t.Errorf("registry:registry_test - expected nil aliases, got %v", aliases)
+	}
+	if defaultAlias != "main" {
+		t.Errorf("registry:registry_test - defaultAlias = %q, want main", defaultAlias)
 	}
 }

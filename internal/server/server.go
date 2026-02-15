@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"net"
+	"path/filepath"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,7 +29,33 @@ import (
 	"github.com/morezero/capabilities-registry/pkg/registry"
 )
 
-const logPrefix = "server:server"
+const (
+	logPrefix            = "server:server"
+	maxNATSRequestBytes  = 1024 * 1024 // 1MB max request body (DoS protection)
+)
+
+// bootstrapResponse is the bootstrap subject response; capabilities use the same shape as resolve (ResolveOutput).
+type bootstrapResponse struct {
+	Name                 string                                    `json:"name"`
+	Version              string                                    `json:"version"`
+	Description          string                                    `json:"description,omitempty"`
+	MinimumCapabilities  []string                                  `json:"minimum_capabilities,omitempty"`
+	Capabilities         map[string]*registry.ResolveOutput         `json:"capabilities"`
+	Aliases              map[string]string                         `json:"aliases"`
+	RegistryAliases      map[string]bootstrap.BootstrapAliasEntry   `json:"registryAliases,omitempty"`
+	DefaultAlias         string                                    `json:"defaultAlias,omitempty"`
+	ChangeEvents         bootstrap.ChangeEventSubjects             `json:"changeEventSubjects"`
+}
+
+// registryForServer is the subset of registry used by the server (for testability).
+type registryForServer interface {
+	Health(ctx context.Context) *registry.HealthOutput
+	Discover(ctx context.Context, input *registry.DiscoverInput) (*registry.DiscoverOutput, error)
+	Describe(ctx context.Context, input *registry.DescribeInput) (*registry.DescribeOutput, error)
+	GetBootstrapCapabilities(ctx context.Context, env string, includeMethods, includeSchemas bool) (map[string]*registry.ResolveOutput, error)
+	LoadRegistryAliases(ctx context.Context) (map[string]string, string, error)
+	Close()
+}
 
 // Server is the capabilities-registry orchestrator.
 type Server struct {
@@ -35,7 +63,7 @@ type Server struct {
 	nc         *comms.Conn
 	pool       *pgxpool.Pool
 	httpServer *http.Server
-	reg        *registry.Registry
+	reg        registryForServer
 }
 
 // Run starts the server, blocks until shutdown signal, then cleans up.
@@ -45,6 +73,9 @@ func Run() error {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("%s - failed to load config: %w", logPrefix, err)
+	}
+	if err := cfg.ValidateForServe(); err != nil {
+		return fmt.Errorf("%s - %w", logPrefix, err)
 	}
 
 	switch cfg.LogLevel {
@@ -83,6 +114,12 @@ func Run() error {
 	}
 	slog.Info(fmt.Sprintf("%s - Registry subject: %s", logPrefix, registrySubject))
 
+	// Client-facing NATS URL (returned to clients via GET /connection and in resolve/bootstrap)
+	natsClientURL := strings.TrimSpace(cfg.NATSClientURL)
+	if natsClientURL == "" {
+		natsClientURL = cfg.COMMSURL
+	}
+
 	// Step 2: Connect to NATS
 	nc, err := commsutil.Connect(cfg.COMMSURL, cfg.COMMSName)
 	if err != nil {
@@ -91,7 +128,11 @@ func Run() error {
 	s.nc = nc
 	slog.Info(fmt.Sprintf("%s - Connected to NATS at %s", logPrefix, cfg.COMMSURL))
 
-	// Step 3: Connect to database
+	// Step 3: Ensure database exists (create on platform if missing), then connect
+	if err := db.EnsureDatabase(ctx, cfg.DatabaseURL); err != nil {
+		nc.Close()
+		return fmt.Errorf("%s - ensure database: %w", logPrefix, err)
+	}
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
 		nc.Close()
@@ -112,14 +153,17 @@ func Run() error {
 			nc.Close()
 			return fmt.Errorf("%s - failed to run migrations: %w", logPrefix, err)
 		}
-		if err := db.SeedBootstrap(ctx, pool, cfg.BootstrapFile); err != nil {
+		// Seed capability metadata from registry/capabilities/metadata.json (e.g. system.registry).
+		// Bootstrap file is not used for seeding; bootstrap response is built from DB.
+		metadataPath := filepath.Clean(filepath.Join(filepath.Dir(cfg.BootstrapFile), "..", "capabilities", "metadata.json"))
+		if err := db.SeedFromCapabilityMetadataFile(ctx, pool, metadataPath, ""); err != nil {
 			pool.Close()
 			nc.Close()
-			return fmt.Errorf("%s - failed to seed bootstrap capabilities: %w", logPrefix, err)
+			return fmt.Errorf("%s - failed to seed capability metadata: %w", logPrefix, err)
 		}
 	}
 
-	// Step 4: Create registry (with NatsUrl for resolve responses)
+	// Step 4: Create registry (with NatsUrl for resolve responses — use client-facing URL so clients match default connection)
 	repo := db.NewRepository(pool)
 	publisherOpts := &events.CommsPublisherOpts{}
 	if cfg.ChangeEventSubject != "" {
@@ -127,7 +171,7 @@ func Run() error {
 	}
 	publisher := events.NewCommsPublisher(nc, publisherOpts)
 	regConfig := registry.DefaultConfig()
-	regConfig.NatsUrl = cfg.COMMSURL
+	regConfig.NatsUrl = natsClientURL
 	reg := registry.NewRegistry(registry.NewRegistryParams{
 		Repo:      repo,
 		Publisher: publisher,
@@ -140,6 +184,19 @@ func Run() error {
 
 	requestTimeout := cfg.RequestTimeout
 	sub, err := nc.Subscribe(registrySubject, func(msg *comms.Msg) {
+		if len(msg.Data) > maxNATSRequestBytes {
+			slog.Error(fmt.Sprintf("%s - request too large: %d bytes", logPrefix, len(msg.Data)))
+			resp := &dispatcher.RegistryResponse{
+				Ok: false,
+				Error: &dispatcher.ErrorDetail{
+					Code:    "INVALID_REQUEST",
+					Message: "Request body too large",
+				},
+			}
+			data, _ := json.Marshal(resp)
+			msg.Respond(data)
+			return
+		}
 		var req dispatcher.RegistryRequest
 		if err := json.Unmarshal(msg.Data, &req); err != nil {
 			slog.Error(fmt.Sprintf("%s - failed to decode request: %v", logPrefix, err))
@@ -175,6 +232,10 @@ func Run() error {
 		data, err := json.Marshal(resp)
 		if err != nil {
 			slog.Error(fmt.Sprintf("%s - failed to encode response: %v", logPrefix, err))
+			errResp := &dispatcher.RegistryResponse{Ok: false, Error: &dispatcher.ErrorDetail{Code: "INTERNAL_ERROR", Message: "Failed to encode response", Retryable: true}}
+			if b, _ := json.Marshal(errResp); len(b) > 0 {
+				msg.Respond(b)
+			}
 			return
 		}
 		msg.Respond(data)
@@ -186,37 +247,49 @@ func Run() error {
 	}
 	slog.Info(fmt.Sprintf("%s - Subscribed to %s", logPrefix, registrySubject))
 
-	// Step 5b: Subscribe to static bootstrap subject (returns bootstrap.json content).
-	// Enriches bootstrap with natsUrl per capability and registry aliases from DB.
+	// Step 5b: Subscribe to bootstrap subject. Response is the same shape as resolve: capabilities map to ResolveOutput (no expiration).
+	// Bootstrap config file supplies envelope (name, version, minimum_capabilities, changeEventSubjects, aliases).
 	bootstrapSub, err := nc.Subscribe(commsutil.SubjectBootstrap, func(msg *comms.Msg) {
-		// Enrich capabilities with natsUrl (default NATS URL for system caps)
-		for capRef, cap := range bootstrapCfg.Capabilities {
-			if cap.NatsUrl == "" {
-				cap.NatsUrl = cfg.COMMSURL
-				bootstrapCfg.Capabilities[capRef] = cap
+		// Load capabilities from DB in resolve shape (include methods; optional schemas)
+		caps, err := reg.GetBootstrapCapabilities(ctx, "production", true, false)
+		if err != nil {
+			slog.Error(fmt.Sprintf("%s - bootstrap get capabilities: %v", logPrefix, err))
+			msg.Respond([]byte(`{"capabilities":{}}`))
+			return
+		}
+		for _, cap := range caps {
+			if cap != nil && cap.NatsUrl == "" {
+				cap.NatsUrl = natsClientURL
 			}
 		}
 
-		// Load registry aliases from database for federation awareness
+		resp := bootstrapResponse{
+			Name:                bootstrapCfg.Name,
+			Version:             bootstrapCfg.Version,
+			Description:         bootstrapCfg.Description,
+			MinimumCapabilities: bootstrapCfg.MinimumCapabilities,
+			Capabilities:        caps,
+			Aliases:             bootstrapCfg.Aliases,
+			ChangeEvents:        bootstrapCfg.ChangeEvents,
+		}
 		if repo != nil {
 			aliases, defaultAlias, err := reg.LoadRegistryAliases(ctx)
 			if err == nil {
-				registryAliases := make(map[string]bootstrap.BootstrapAliasEntry)
+				resp.RegistryAliases = make(map[string]bootstrap.BootstrapAliasEntry)
 				for alias, natsUrl := range aliases {
-					registryAliases[alias] = bootstrap.BootstrapAliasEntry{NatsUrl: natsUrl}
+					resp.RegistryAliases[alias] = bootstrap.BootstrapAliasEntry{NatsUrl: natsUrl}
 				}
-				// Always include the default/local alias
-				if _, ok := registryAliases[defaultAlias]; !ok {
-					registryAliases[defaultAlias] = bootstrap.BootstrapAliasEntry{NatsUrl: cfg.COMMSURL}
+				if _, ok := resp.RegistryAliases[defaultAlias]; !ok {
+					resp.RegistryAliases[defaultAlias] = bootstrap.BootstrapAliasEntry{NatsUrl: natsClientURL}
 				}
-				bootstrapCfg.RegistryAliases = registryAliases
-				bootstrapCfg.DefaultAlias = defaultAlias
+				resp.DefaultAlias = defaultAlias
 			}
 		}
 
-		data, err := json.Marshal(bootstrapCfg)
+		data, err := json.Marshal(resp)
 		if err != nil {
 			slog.Error(fmt.Sprintf("%s - bootstrap response encode: %v", logPrefix, err))
+			msg.Respond([]byte(`{"ok":false,"error":{"code":"INTERNAL_ERROR","message":"Failed to encode bootstrap response","retryable":true}}`))
 			return
 		}
 		msg.Respond(data)
@@ -252,19 +325,36 @@ func Run() error {
 		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
 	})
 
+	// Connection data for clients: NATS URL to use (registry-first flow; natsClientURL computed above).
+	mux.HandleFunc("/connection", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"natsUrl": natsClientURL})
+	})
+
 	httpAddr := cfg.HTTPAddr
 	if httpAddr == "" {
 		httpAddr = fmt.Sprintf(":%d", cfg.HTTPPort)
 	}
 	s.httpServer = &http.Server{Addr: httpAddr, Handler: mux}
+	listenPort := ""
+	if _, port, err := net.SplitHostPort(httpAddr); err == nil {
+		listenPort = port
+	} else {
+		listenPort = fmt.Sprintf("%d", cfg.HTTPPort)
+	}
 	go func() {
-		slog.Info(fmt.Sprintf("%s - HTTP health server listening on %s", logPrefix, httpAddr))
+		slog.Info(fmt.Sprintf("%s - registry listening on port %s (%s)", logPrefix, listenPort, httpAddr))
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			slog.Error(fmt.Sprintf("%s - HTTP server error: %v", logPrefix, err))
 		}
 	}()
 
-	slog.Info(fmt.Sprintf("%s - Capabilities-server is ready", logPrefix))
+	slog.Info(fmt.Sprintf("%s - capabilities-registry is ready", logPrefix))
 
 	// Wait for shutdown signal
 	sigCh := make(chan os.Signal, 1)
@@ -653,7 +743,10 @@ func (s *Server) handleCapabilityDetail() http.HandlerFunc {
 			if suffix == "" {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusInternalServerError)
-				tmpl.Execute(w, capabilityDetailData{DescribeError: err.Error()})
+				if execErr := tmpl.Execute(w, capabilityDetailData{DescribeError: err.Error()}); execErr != nil {
+					slog.Error(fmt.Sprintf("%s - capability detail template execute (error path): %v", logPrefix, execErr))
+					http.Error(w, "internal error", http.StatusInternalServerError)
+				}
 			} else {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
@@ -676,7 +769,10 @@ func (s *Server) handleCapabilityDetail() http.HandlerFunc {
 				specURL = "http://" + r.Host + "/capability/" + url.PathEscape(describe.Cap) + "/openapi.json"
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			swaggerTmpl.Execute(w, map[string]string{"Cap": describe.Cap, "SpecURL": specURL})
+			if execErr := swaggerTmpl.Execute(w, map[string]string{"Cap": describe.Cap, "SpecURL": specURL}); execErr != nil {
+				slog.Error(fmt.Sprintf("%s - swagger template execute: %v", logPrefix, execErr))
+				http.Error(w, "internal error", http.StatusInternalServerError)
+			}
 			return
 		case "":
 			// fall through to detail page

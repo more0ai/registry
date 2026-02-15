@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
@@ -14,6 +15,8 @@ type Config struct {
 	// COMMS: connect to standalone NATS at COMMSURL.
 	COMMSURL  string `envconfig:"COMMS_URL" default:"nats://127.0.0.1:4222"`
 	COMMSName string `envconfig:"SERVICE_NAME" default:"capabilities-registry"`
+	// NATSClientURL is the NATS URL returned to clients via GET /connection (e.g. from host: nats://127.0.0.1:4222).
+	NATSClientURL string `envconfig:"NATS_CLIENT_URL"`
 
 	// Registry subject overrides (empty = derive from bootstrap)
 	RegistrySubject    string `envconfig:"REGISTRY_SUBJECT"`
@@ -46,4 +49,26 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// ValidateForServe checks required config when running the registry server.
+func (c *Config) ValidateForServe() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("%s - DATABASE_URL is required for serve", logPrefix)
+	}
+	if c.RequestTimeout <= 0 {
+		return fmt.Errorf("%s - REGISTRY_REQUEST_TIMEOUT must be positive", logPrefix)
+	}
+	if c.HealthCheckTimeout <= 0 {
+		return fmt.Errorf("%s - HEALTH_CHECK_TIMEOUT must be positive", logPrefix)
+	}
+	return nil
+}
+
+// ValidateForDB checks required config when running DB-dependent commands (migrate, clear, seed).
+func (c *Config) ValidateForDB() error {
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("%s - DATABASE_URL is required", logPrefix)
+	}
+	return nil
 }

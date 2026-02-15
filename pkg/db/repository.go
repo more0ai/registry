@@ -84,6 +84,9 @@ type UpsertCapabilityParams struct {
 	UserID      string
 }
 
+// MaxDiscoverLimit is the maximum limit allowed for ListCapabilities/Discover (DoS protection).
+const MaxDiscoverLimit = 500
+
 // ListCapabilities lists capabilities with optional filters.
 func (r *Repository) ListCapabilities(ctx context.Context, params ListCapabilitiesParams) ([]Capability, int, error) {
 	page := params.Page
@@ -93,6 +96,9 @@ func (r *Repository) ListCapabilities(ctx context.Context, params ListCapabiliti
 	limit := params.Limit
 	if limit < 1 {
 		limit = 20
+	}
+	if limit > MaxDiscoverLimit {
+		limit = MaxDiscoverLimit
 	}
 	offset := (page - 1) * limit
 
@@ -606,11 +612,12 @@ func (r *Repository) GetTenantRules(ctx context.Context, capabilityID string, rc
 }
 
 // CheckTenantAccess checks if a tenant has access to a specific major version.
+// On error (e.g. DB failure) returns false (fail closed) so access is denied until rules can be evaluated.
 func (r *Repository) CheckTenantAccess(ctx context.Context, capabilityID string, major int, rctx ResolutionContext) (bool, string) {
 	rules, err := r.GetTenantRules(ctx, capabilityID, rctx)
 	if err != nil {
 		slog.Error(fmt.Sprintf("%s - CheckTenantAccess failed to get rules: %v", repoLogPrefix, err))
-		return true, "" // fail open
+		return false, "Tenant access check unavailable"
 	}
 
 	for _, rule := range rules {
@@ -734,6 +741,52 @@ func scanVersions(rows pgx.Rows) ([]CapabilityVersion, error) {
 		versions = append(versions, v)
 	}
 	return versions, nil
+}
+
+// BootstrapEntry holds one capability's default version for bootstrap response (resolve-shaped).
+type BootstrapEntry struct {
+	App           string
+	Name          string
+	Description   string
+	DefaultMajor  int
+	VersionString string
+	VersionStatus string
+	VersionID     string
+}
+
+// ListBootstrapEntries returns all capabilities that have a default version for the given env,
+// with that version's version_string, status, and version_id (for loading methods). Used to build bootstrap response from DB.
+func (r *Repository) ListBootstrapEntries(ctx context.Context, env string) ([]BootstrapEntry, error) {
+	query := `
+WITH def AS (
+  SELECT capability_id, default_major FROM capability_defaults WHERE env = $1
+),
+latest_ver AS (
+  SELECT DISTINCT ON (capability_id, major) id, capability_id, major,
+         COALESCE(version_string, major::text || '.0.0') AS version_string, status
+  FROM capability_versions
+  ORDER BY capability_id, major, minor DESC, patch DESC
+)
+SELECT c.app, c.name, COALESCE(c.description, ''), d.default_major,
+       lv.version_string, lv.status, lv.id AS version_id
+FROM capabilities c
+JOIN def d ON d.capability_id = c.id
+JOIN latest_ver lv ON lv.capability_id = c.id AND lv.major = d.default_major`
+	rows, err := r.pool.Query(ctx, query, env)
+	if err != nil {
+		return nil, fmt.Errorf("%s - ListBootstrapEntries failed: %w", repoLogPrefix, err)
+	}
+	defer rows.Close()
+	var out []BootstrapEntry
+	for rows.Next() {
+		var e BootstrapEntry
+		if err := rows.Scan(&e.App, &e.Name, &e.Description, &e.DefaultMajor,
+			&e.VersionString, &e.VersionStatus, &e.VersionID); err != nil {
+			return nil, fmt.Errorf("%s - ListBootstrapEntries scan failed: %w", repoLogPrefix, err)
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 func containsInt(slice []int, val int) bool {

@@ -1,0 +1,350 @@
+{
+  "capability": "system.registry",
+  "major": 1,
+  "version": "1.0.0",
+  "status": "active",
+  "description": "Core registry service for capability resolution, discovery, describe, upsert, deprecate, disable, setDefaultMajor, listMajors, and health",
+  "methods": {
+    "resolve": {
+      "description": "Resolve a capability reference to a NATS subject and server URL",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string", "description": "Capability reference (e.g. app.name or alias)" },
+          "ver": { "type": "string", "description": "Optional version constraint (e.g. ^1, 1.0.0)" },
+          "ctx": {
+            "type": "object",
+            "properties": {
+              "tenantId": { "type": "string" },
+              "env": { "type": "string" },
+              "aud": { "type": "string" },
+              "features": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "includeMethods": { "type": "boolean", "description": "Include method list in response" },
+          "includeSchemas": { "type": "boolean", "description": "Include method schemas in response" }
+        },
+        "required": ["cap"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "canonicalIdentity": { "type": "string" },
+          "natsUrl": { "type": "string" },
+          "subject": { "type": "string" },
+          "major": { "type": "integer" },
+          "resolvedVersion": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "deprecated", "disabled"] },
+          "ttlSeconds": { "type": "integer" },
+          "etag": { "type": "string" },
+          "expiresAt": { "type": "string" },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "modes": { "type": "array", "items": { "type": "string" } },
+                "tags": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          },
+          "schemas": { "type": "object", "additionalProperties": true }
+        },
+        "required": ["canonicalIdentity", "natsUrl", "subject", "major", "resolvedVersion", "status", "ttlSeconds", "etag"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "discover": {
+      "description": "Discover capabilities by app, tags, or query",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "app": { "type": "string", "description": "Filter by app name" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "query": { "type": "string" },
+          "status": { "type": "string", "enum": ["active", "deprecated", "disabled", "all"] },
+          "supportsMethod": { "type": "string" },
+          "ctx": {
+            "type": "object",
+            "properties": {
+              "tenantId": { "type": "string" },
+              "env": { "type": "string" },
+              "aud": { "type": "string" },
+              "features": { "type": "array", "items": { "type": "string" } }
+            }
+          },
+          "page": { "type": "integer" },
+          "limit": { "type": "integer" }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "cap": { "type": "string" },
+                "app": { "type": "string" },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "defaultMajor": { "type": "integer" },
+                "latestVersion": { "type": "string" },
+                "majors": { "type": "array", "items": { "type": "integer" } },
+                "status": { "type": "string" }
+              },
+              "required": ["cap", "app", "name", "tags", "defaultMajor", "latestVersion", "majors", "status"]
+            }
+          },
+          "pagination": {
+            "type": "object",
+            "properties": {
+              "page": { "type": "integer" },
+              "limit": { "type": "integer" },
+              "total": { "type": "integer" },
+              "totalPages": { "type": "integer" }
+            },
+            "required": ["page", "limit", "total", "totalPages"]
+          }
+        },
+        "required": ["capabilities", "pagination"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "describe": {
+      "description": "Get full description of a capability including methods and schemas",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string", "description": "Capability reference" },
+          "major": { "type": "integer", "description": "Specific major version" },
+          "version": { "type": "string", "description": "Specific version (e.g. 1.0.0)" }
+        },
+        "required": ["cap"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string" },
+          "app": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "version": { "type": "string" },
+          "major": { "type": "integer" },
+          "status": { "type": "string", "enum": ["active", "deprecated", "disabled"] },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "inputSchema": { "type": "object" },
+                "outputSchema": { "type": "object" },
+                "modes": { "type": "array", "items": { "type": "string" } },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "examples": { "type": "array" }
+              }
+            }
+          },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "changelog": { "type": "string" }
+        },
+        "required": ["cap", "app", "name", "version", "major", "status", "methods", "tags"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "upsert": {
+      "description": "Create or update a capability version",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "app": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "version": {
+            "type": "object",
+            "properties": {
+              "major": { "type": "integer" },
+              "minor": { "type": "integer" },
+              "patch": { "type": "integer" },
+              "prerelease": { "type": "string" },
+              "description": { "type": "string" },
+              "changelog": { "type": "string" },
+              "metadata": { "type": "object" }
+            },
+            "required": ["major", "minor", "patch"]
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "inputSchema": { "type": "object" },
+                "outputSchema": { "type": "object" },
+                "modes": { "type": "array", "items": { "type": "string" } },
+                "tags": { "type": "array", "items": { "type": "string" } },
+                "policies": { "type": "object" },
+                "examples": { "type": "array" }
+              },
+              "required": ["name"]
+            }
+          },
+          "setAsDefault": { "type": "boolean" },
+          "env": { "type": "string" }
+        },
+        "required": ["app", "name", "version", "methods"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["created", "updated"] },
+          "capabilityId": { "type": "string" },
+          "versionId": { "type": "string" },
+          "cap": { "type": "string" },
+          "version": { "type": "string" },
+          "subject": { "type": "string" }
+        },
+        "required": ["action", "capabilityId", "versionId", "cap", "version", "subject"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "deprecate": {
+      "description": "Deprecate a capability version or major",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string" },
+          "version": { "type": "string", "description": "Specific version to deprecate" },
+          "major": { "type": "integer", "description": "Deprecate entire major" },
+          "reason": { "type": "string" }
+        },
+        "required": ["cap", "reason"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "affectedVersions": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["success", "affectedVersions"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "disable": {
+      "description": "Disable a capability version or major",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string" },
+          "version": { "type": "string" },
+          "major": { "type": "integer" },
+          "reason": { "type": "string" }
+        },
+        "required": ["cap", "reason"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "affectedVersions": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["success", "affectedVersions"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "setDefaultMajor": {
+      "description": "Set the default major version for a capability",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string" },
+          "major": { "type": "integer" },
+          "env": { "type": "string" }
+        },
+        "required": ["cap", "major"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "previousMajor": { "type": "integer" },
+          "newMajor": { "type": "integer" }
+        },
+        "required": ["success", "newMajor"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "listMajors": {
+      "description": "List major versions for a capability",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cap": { "type": "string" },
+          "includeInactive": { "type": "boolean" }
+        },
+        "required": ["cap"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "majors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "major": { "type": "integer" },
+                "latestVersion": { "type": "string" },
+                "status": { "type": "string", "enum": ["active", "deprecated", "disabled"] },
+                "versionCount": { "type": "integer" },
+                "isDefault": { "type": "boolean" }
+              },
+              "required": ["major", "latestVersion", "status", "versionCount", "isDefault"]
+            }
+          }
+        },
+        "required": ["majors"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    },
+    "health": {
+      "description": "Registry health check",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "database": { "type": "boolean" },
+              "comms": { "type": "boolean" }
+            }
+          },
+          "timestamp": { "type": "string" }
+        },
+        "required": ["status", "checks", "timestamp"]
+      },
+      "modes": ["sync"],
+      "tags": []
+    }
+  }
+}

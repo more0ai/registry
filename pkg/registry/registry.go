@@ -124,3 +124,66 @@ func (r *Registry) LoadRegistryAliases(ctx context.Context) (map[string]string, 
 	}
 	return r.federationPool.LoadRegistryAliases(ctx)
 }
+
+// GetBootstrapCapabilities returns capabilities from the database in the same shape as resolve:
+// ResolveOutput per capability (canonicalIdentity, natsUrl, subject, major, resolvedVersion, status, ttlSeconds=0, etag, methods, optional schemas).
+func (r *Registry) GetBootstrapCapabilities(ctx context.Context, env string, includeMethods, includeSchemas bool) (map[string]*ResolveOutput, error) {
+	if r.repo == nil {
+		return map[string]*ResolveOutput{}, nil
+	}
+	entries, err := r.repo.ListBootstrapEntries(ctx, env)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*ResolveOutput, len(entries))
+	natsUrl := r.config.NatsUrl
+	if natsUrl == "" {
+		natsUrl = "nats://127.0.0.1:4222"
+	}
+	alias := r.config.DefaultAlias
+	if alias == "" {
+		alias = defaultAlias
+	}
+	for _, e := range entries {
+		capRef := e.App + "." + e.Name
+		subject := r.buildSubject(e.App, e.Name, e.DefaultMajor)
+		canonicalIdentity := fmt.Sprintf("cap:@%s/%s/%s@%s", alias, e.App, e.Name, e.VersionString)
+		ro := &ResolveOutput{
+			CanonicalIdentity: canonicalIdentity,
+			NatsUrl:           natsUrl,
+			Subject:           subject,
+			Major:             e.DefaultMajor,
+			ResolvedVersion:   e.VersionString,
+			Status:            e.VersionStatus,
+			TTLSeconds:        0,
+			Etag:              "bootstrap",
+		}
+		if includeMethods || includeSchemas {
+			methods, err := r.repo.GetMethods(ctx, e.VersionID)
+			if err == nil {
+				if includeMethods {
+					ro.Methods = make([]MethodInfo, len(methods))
+					for i, m := range methods {
+						ro.Methods[i] = MethodInfo{
+							Name:        m.Name,
+							Description: ptrStringOr(m.Description, ""),
+							Modes:       m.Modes,
+							Tags:        m.Tags,
+						}
+					}
+				}
+				if includeSchemas {
+					ro.Schemas = make(map[string]Schema, len(methods))
+					for _, m := range methods {
+						ro.Schemas[m.Name] = Schema{
+							Input:  jsonBytesToMap(m.InputSchema),
+							Output: jsonBytesToMap(m.OutputSchema),
+						}
+					}
+				}
+			}
+		}
+		out[capRef] = ro
+	}
+	return out, nil
+}
